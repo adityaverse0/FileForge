@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <title>FileForge</title>
+  <link rel="stylesheet" href="/static/css/styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z'></path></svg>">
+</head>
+<body>
+  <div id="app" class="app-root">
+    <!-- Minimal Header -->
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-title">FileForge</span>
+      </div>
+
+      <!-- Desktop Search -->
+      <div class="header-search-container" id="headerSearchContainer">
+        <div class="search-input-wrapper">
+          <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input type="text" id="searchInput" placeholder="Search..." autocomplete="off">
+          <button id="clearSearchBtn" class="search-clear-btn hidden" title="Clear search" aria-label="Clear search">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <!-- Mobile Search Toggle -->
+        <button id="mobileSearchBtn" class="header-action-btn mobile-only" title="Search" aria-label="Search">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+        </button>
+
+        <!-- View Mode Toggle (List/Grid) -->
+        <button id="viewToggleBtn" class="header-action-btn" title="Toggle view mode" aria-label="Toggle view mode">
+          <svg id="viewToggleIcon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="7"></rect>
+            <rect x="14" y="3" width="7" height="7"></rect>
+            <rect x="14" y="14" width="7" height="7"></rect>
+            <rect x="3" y="14" width="7" height="7"></rect>
+          </svg>
+        </button>
+
+        <!-- Settings Button: Text on desktop, ⋯ on mobile -->
+        <button id="settingsBtn" class="header-action-btn settings-btn" title="Settings" aria-label="Settings">
+          <span class="desktop-only">Settings</span>
+          <svg class="mobile-only" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="1"></circle>
+            <circle cx="19" cy="12" r="1"></circle>
+            <circle cx="5" cy="12" r="1"></circle>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Mobile Search Panel -->
+    <div id="mobileSearchPanel" class="mobile-search-panel hidden">
+      <div class="search-input-wrapper">
+        <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input type="text" id="mobileSearchInput" placeholder="Search..." autocomplete="off">
+        <button id="mobileClearSearchBtn" class="search-clear-btn hidden">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <button id="cancelMobileSearchBtn" class="text-btn">Cancel</button>
+    </div>
+
+    <!-- Navigation & Toolbar -->
+    <nav class="navigation-bar">
+      <div class="breadcrumbs-scroll-container">
+        <ol class="breadcrumbs" id="breadcrumbs" aria-label="Breadcrumb navigation"></ol>
+      </div>
+
+      <div class="toolbar-actions">
+        <div class="sort-menu-wrapper">
+          <button id="sortBtn" class="tool-btn" title="Sort items">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M11 5h10M11 9h7M11 13h4M3 17l3 3 3-3M6 18V4"></path>
+            </svg>
+            <span id="currentSortLabel">Sort</span>
+          </button>
+          <div id="sortDropdown" class="glass-dropdown hidden">
+            <button class="dropdown-item active" data-sort="name">Name</button>
+            <button class="dropdown-item" data-sort="mtime">Date</button>
+            <button class="dropdown-item" data-sort="size">Size</button>
+            <button class="dropdown-item" data-sort="type">Type</button>
+            <div class="dropdown-divider"></div>
+            <button class="dropdown-item" id="toggleSortOrderBtn" data-order="asc">Order: Ascending</button>
+          </div>
+        </div>
+
+        <button id="newFolderBtn" class="tool-btn" title="Create Folder">
+          <span>+ Folder</span>
+        </button>
+
+        <button id="uploadBtn" class="action-btn-primary" title="Upload Files">
+          <span>Upload</span>
+        </button>
+        <input type="file" id="fileInput" multiple style="display:none">
+      </div>
+    </nav>
+
+    <!-- Multi-select Glass Action Bar -->
+    <div id="multiActionBar" class="multi-action-bar hidden">
+      <div class="multi-bar-left">
+        <label class="custom-checkbox-wrapper">
+          <input type="checkbox" id="selectAllCheckbox">
+          <span class="checkbox-box"></span>
+        </label>
+        <span id="selectedCountText" class="selected-count-text">0 selected</span>
+      </div>
+      <div class="multi-bar-actions">
+        <button id="multiDownloadBtn" class="multi-btn" title="Download ZIP">
+          <span>ZIP</span>
+        </button>
+        <button id="multiDeleteBtn" class="multi-btn danger" title="Delete selected">
+          <span>Delete</span>
+        </button>
+        <button id="multiClearBtn" class="icon-btn-sm" title="Clear selection">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- Loading State -->
+      <div id="loadingState" class="loading-state hidden">
+        <div class="liquid-spinner"></div>
+        <span>Loading...</span>
+      </div>
+
+      <!-- Error State -->
+      <div id="errorState" class="state-card hidden">
+        <h3 id="errorStateTitle">Couldn't open this folder</h3>
+        <p id="errorStateMessage" class="state-desc">The folder may have been moved, deleted, or is inaccessible.</p>
+        <button id="errorRetryBtn" class="action-btn-secondary">Retry</button>
+      </div>
+
+      <!-- Empty State -->
+      <div id="emptyState" class="state-card hidden">
+        <h3 id="emptyStateTitle">Nothing here yet</h3>
+        <p id="emptyStateMessage" class="state-desc">Upload files or create a folder to get started.</p>
+      </div>
+
+      <!-- Items Grid / List Container -->
+      <div id="fileContainer" class="file-container list-view">
+        <div id="itemsWrapper" class="items-wrapper"></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Drag & Drop Overlay -->
+  <div id="dropOverlay" class="drop-overlay hidden">
+    <div class="drop-card glass-panel">
+      <h2>Drop files to upload</h2>
+      <p>Files will be saved to the current directory</p>
+    </div>
+  </div>
+
+  <!-- Floating Upload Progress Panel -->
+  <div id="uploadProgressPanel" class="upload-progress-panel glass-panel hidden">
+    <div class="panel-header">
+      <span id="uploadPanelTitle" class="panel-title">Uploading...</span>
+      <button id="closeUploadPanelBtn" class="icon-btn-sm" title="Close panel">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+    <div class="overall-progress-bar">
+      <div id="uploadProgressFill" class="progress-fill" style="width: 0%"></div>
+    </div>
+    <div id="uploadList" class="upload-items-list"></div>
+  </div>
+
+  <!-- Floating Context Menu -->
+  <div id="contextMenu" class="context-menu glass-panel hidden" role="menu">
+    <div class="menu-header" id="contextMenuHeader">
+      <span id="contextMenuTitle" class="menu-title">Item Name</span>
+    </div>
+    <div class="menu-divider"></div>
+    <button class="menu-item" data-action="open">
+      <span>Open</span>
+    </button>
+    <button class="menu-item" data-action="download">
+      <span>Download</span>
+    </button>
+    <button class="menu-item" data-action="rename">
+      <span>Rename</span>
+    </button>
+    <button class="menu-item" data-action="share">
+      <span>Share</span>
+    </button>
+    <button class="menu-item" data-action="properties">
+      <span>Properties</span>
+    </button>
+    <div class="menu-divider"></div>
+    <button class="menu-item danger" data-action="delete">
+      <span>Delete</span>
+    </button>
+  </div>
+
+  <!-- Settings Page / Modal -->
+  <div id="settingsModal" class="modal-backdrop hidden">
+    <div class="modal-card sheet-modal">
+      <div class="settings-nav-header">
+        <button class="back-btn close-modal-btn" data-modal="settingsModal" aria-label="Back">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="19" y1="12" x2="5" y2="12"></line>
+            <polyline points="12 19 5 12 12 5"></polyline>
+          </svg>
+        </button>
+        <span class="settings-title">Settings</span>
+      </div>
+      <div class="modal-body settings-body">
+        <!-- Appearance -->
+        <div class="settings-section">
+          <div class="section-title">Appearance</div>
+          <div class="settings-list">
+            <div class="setting-row">
+              <div class="setting-info">
+                <span class="setting-label">Theme</span>
+              </div>
+              <div class="segmented-control">
+                <button class="theme-option segment-btn" data-theme-val="system">System</button>
+                <button class="theme-option segment-btn" data-theme-val="light">Light</button>
+                <button class="theme-option segment-btn" data-theme-val="dark">Dark</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- View -->
+        <div class="settings-section">
+          <div class="section-title">View</div>
+          <div class="settings-list">
+            <div class="setting-row">
+              <div class="setting-info">
+                <span class="setting-label">Default view</span>
+              </div>
+              <div class="segmented-control">
+                <button class="segment-btn" data-view-val="list">List</button>
+                <button class="segment-btn" data-view-val="grid">Grid</button>
+              </div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-info">
+                <span class="setting-label">Show hidden files</span>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="showHiddenToggle">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Behavior -->
+        <div class="settings-section">
+          <div class="section-title">Behavior</div>
+          <div class="settings-list">
+            <div class="setting-row">
+              <div class="setting-info">
+                <span class="setting-label">Confirm before delete</span>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="confirmDeleteToggle" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Server -->
+        <div class="settings-section">
+          <div class="section-title">Server</div>
+          <div class="settings-list">
+            <div class="setting-row">
+              <div class="setting-info">
+                <span class="setting-label">Server status</span>
+              </div>
+              <span class="setting-value">Running</span>
+            </div>
+            <div class="setting-row">
+              <div class="setting-info">
+                <span class="setting-label">Port</span>
+              </div>
+              <span class="setting-value">8080</span>
+            </div>
+            <div class="setting-row" id="storageRow">
+              <div class="setting-info">
+                <span class="setting-label">Storage used</span>
+                <span class="setting-sublabel" id="settingsStorageDetails">0 GB of 0 GB</span>
+              </div>
+              <span class="setting-value" id="settingsStoragePercent">0%</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- About -->
+        <div class="settings-section">
+          <div class="section-title">About</div>
+          <div class="settings-list">
+            <div class="setting-row">
+              <div class="setting-info">
+                <span class="setting-label">Version</span>
+              </div>
+              <span class="setting-value">0.1.0</span>
+            </div>
+            <div class="setting-row">
+              <div class="setting-info">
+                <span class="setting-label">License</span>
+              </div>
+              <span class="setting-value">MIT</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- New Folder Modal -->
+  <div id="newFolderModal" class="modal-backdrop hidden">
+    <div class="modal-card dialog-modal glass-panel">
+      <div class="modal-header">
+        <h2>New Folder</h2>
+        <button class="icon-btn-sm close-modal-btn" data-modal="newFolderModal">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="form-field">
+          <label for="newFolderNameInput">Folder Name</label>
+          <input type="text" id="newFolderNameInput" placeholder="New Folder" autocomplete="off">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="action-btn-secondary close-modal-btn" data-modal="newFolderModal">Cancel</button>
+        <button id="confirmNewFolderBtn" class="action-btn-primary">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Rename Modal -->
+  <div id="renameModal" class="modal-backdrop hidden">
+    <div class="modal-card dialog-modal glass-panel">
+      <div class="modal-header">
+        <h2>Rename Item</h2>
+        <button class="icon-btn-sm close-modal-btn" data-modal="renameModal">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="form-field">
+          <label for="renameItemInput">New Name</label>
+          <input type="text" id="renameItemInput" autocomplete="off">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="action-btn-secondary close-modal-btn" data-modal="renameModal">Cancel</button>
+        <button id="confirmRenameBtn" class="action-btn-primary">Rename</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Properties Modal -->
+  <div id="propertiesModal" class="modal-backdrop hidden">
+    <div class="modal-card dialog-modal glass-panel">
+      <div class="modal-header">
+        <h2>Properties</h2>
+        <button class="icon-btn-sm close-modal-btn" data-modal="propertiesModal">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="props-list">
+          <div class="prop-row"><span class="prop-key">Name</span><span id="propName" class="prop-val"></span></div>
+          <div class="prop-row"><span class="prop-key">Type</span><span id="propType" class="prop-val"></span></div>
+          <div class="prop-row"><span class="prop-key">Size</span><span id="propSize" class="prop-val"></span></div>
+          <div class="prop-row"><span class="prop-key">Path</span><span id="propPath" class="prop-val path-val"></span></div>
+          <div class="prop-row"><span class="prop-key">Modified</span><span id="propMtime" class="prop-val"></span></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="action-btn-primary close-modal-btn" data-modal="propertiesModal">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Share Modal -->
+  <div id="shareModal" class="modal-backdrop hidden">
+    <div class="modal-card dialog-modal glass-panel">
+      <div class="modal-header">
+        <h2>Share Item</h2>
+        <button class="icon-btn-sm close-modal-btn" data-modal="shareModal">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p id="shareItemName" class="modal-subtext"></p>
+        <div class="form-field">
+          <label for="sharePasswordInput">Optional Password</label>
+          <input type="password" id="sharePasswordInput" placeholder="Leave blank for public">
+        </div>
+        <div class="form-field">
+          <label for="shareExpireSelect">Expiration</label>
+          <select id="shareExpireSelect">
+            <option value="">Never</option>
+            <option value="3600">1 Hour</option>
+            <option value="86400" selected>24 Hours</option>
+            <option value="604800">7 Days</option>
+          </select>
+        </div>
+        <div id="shareResultArea" class="form-field hidden" style="margin-top: 12px;">
+          <label>Share Link</label>
+          <div class="input-with-button">
+            <input type="text" id="shareUrlOutput" readonly>
+            <button id="copyShareUrlBtn" class="action-btn-secondary">Copy</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="action-btn-secondary close-modal-btn" data-modal="shareModal">Cancel</button>
+        <button id="confirmShareBtn" class="action-btn-primary">Generate Link</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Preview Modal -->
+  <div id="previewModal" class="modal-backdrop hidden">
+    <div class="modal-card preview-modal glass-panel">
+      <div class="modal-header">
+        <h2 id="previewTitle" class="truncate-title">File Preview</h2>
+        <button class="icon-btn-sm close-modal-btn" data-modal="previewModal">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      <div id="previewBody" class="preview-body"></div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

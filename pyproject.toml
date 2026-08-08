@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fileforge-server"
+version = "0.1.0"
+description = "A modern, lightweight HTTP file server designed for Android/Termux and cross-platform use."
+readme = "README.md"
+authors = [
+    { name = "FileForge Team", email = "info@fileforge.local" }
+]
+license = { text = "MIT" }
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Communications :: File Sharing",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+]
+keywords = ["file-server", "http-server", "termux", "android", "fastapi", "web-file-manager"]
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+    "python-multipart>=0.0.6",
+]
+requires-python = ">=3.10"
+
+[project.scripts]
+fileforge = "fileforge.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/fileforge/fileforge"
+Documentation = "https://github.com/fileforge/fileforge#readme"
+Repository = "https://github.com/fileforge/fileforge.git"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+fileforge = ["static/**/*", "static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"

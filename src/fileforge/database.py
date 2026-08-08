@@ -47,6 +47,20 @@ class Database:
                     max_hits INTEGER
                 )
             """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS watch_progress (
+                    path TEXT PRIMARY KEY,
+                    position_seconds REAL NOT NULL,
+                    duration_seconds REAL NOT NULL,
+                    updated_at INTEGER NOT NULL
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS watch_favorites (
+                    path TEXT PRIMARY KEY,
+                    created_at INTEGER NOT NULL
+                )
+            """)
             conn.commit()
 
     def set_config(self, key: str, value: str):
@@ -185,5 +199,68 @@ class Database:
             conn.commit()
             return cursor.rowcount > 0
 
+    # Watch Progress & Favorites Methods
+    def save_watch_progress(self, path: str, position_seconds: float, duration_seconds: float):
+        now = int(time.time())
+        with self.get_connection() as conn:
+            conn.execute(
+                """INSERT INTO watch_progress (path, position_seconds, duration_seconds, updated_at)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(path) DO UPDATE SET
+                   position_seconds = excluded.position_seconds,
+                   duration_seconds = excluded.duration_seconds,
+                   updated_at = excluded.updated_at""",
+                (path, float(position_seconds), float(duration_seconds), now)
+            )
+            conn.commit()
+
+    def get_watch_progress(self, path: str) -> Optional[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            row = conn.execute("SELECT * FROM watch_progress WHERE path = ?", (path,)).fetchone()
+            if not row:
+                return None
+            d = dict(row)
+            percent = round((d["position_seconds"] / d["duration_seconds"]) * 100, 1) if d["duration_seconds"] > 0 else 0.0
+            d["percent"] = min(100.0, max(0.0, percent))
+            return d
+
+    def list_watch_progress(self, limit: int = 50) -> List[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM watch_progress WHERE position_seconds > 3 ORDER BY updated_at DESC LIMIT ?",
+                (limit,)
+            ).fetchall()
+            result = []
+            for r in rows:
+                d = dict(r)
+                percent = round((d["position_seconds"] / d["duration_seconds"]) * 100, 1) if d["duration_seconds"] > 0 else 0.0
+                d["percent"] = min(100.0, max(0.0, percent))
+                if d["percent"] < 98.0:
+                    result.append(d)
+            return result
+
+    def add_watch_favorite(self, path: str):
+        now = int(time.time())
+        with self.get_connection() as conn:
+            conn.execute("INSERT OR REPLACE INTO watch_favorites (path, created_at) VALUES (?, ?)", (path, now))
+            conn.commit()
+
+    def remove_watch_favorite(self, path: str) -> bool:
+        with self.get_connection() as conn:
+            cursor = conn.execute("DELETE FROM watch_favorites WHERE path = ?", (path,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def list_watch_favorites(self) -> List[str]:
+        with self.get_connection() as conn:
+            rows = conn.execute("SELECT path FROM watch_favorites ORDER BY created_at DESC").fetchall()
+            return [r["path"] for r in rows]
+
+    def is_watch_favorite(self, path: str) -> bool:
+        with self.get_connection() as conn:
+            row = conn.execute("SELECT path FROM watch_favorites WHERE path = ?", (path,)).fetchone()
+            return bool(row)
+
 
 db = Database()
+

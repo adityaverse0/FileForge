@@ -12,6 +12,7 @@ from fileforge.routes.files import router as files_router
 from fileforge.routes.auth import router as auth_router
 from fileforge.routes.shares import router as shares_router
 from fileforge.routes.storage import router as storage_router
+from fileforge.routes.watch import router as watch_router
 
 
 def create_app() -> FastAPI:
@@ -48,6 +49,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(shares_router)
     app.include_router(storage_router)
+    app.include_router(watch_router)
 
     # Static files directory
     static_dir = Path(__file__).parent / "static"
@@ -58,6 +60,8 @@ def create_app() -> FastAPI:
 
         @app.get("/")
         @app.get("/browse/{full_path:path}")
+        @app.get("/watch")
+        @app.get("/watch/{full_path:path}")
         async def serve_index(full_path: str = ""):
             index_path = static_dir / "index.html"
             if index_path.exists():

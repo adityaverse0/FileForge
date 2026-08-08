@@ -1,10 +1,11 @@
 /**
- * FileForge — Minimalist Mobile-First Engine
+ * FileForge — Minimalist Mobile-First Engine with Watch Media Mode
  */
 
 document.addEventListener('DOMContentLoaded', () => {
   // Application State
   const state = {
+    currentTab: 'files',
     currentPath: '',
     showHidden: localStorage.getItem('ff_show_hidden') === 'true',
     viewMode: localStorage.getItem('ff_view_mode') || 'list',
@@ -16,12 +17,27 @@ document.addEventListener('DOMContentLoaded', () => {
     selectedPaths: new Set(),
     activeContextItem: null,
     searchDebounceTimer: null,
-    touchTimer: null
+    touchTimer: null,
+
+    // Watch Media State
+    watch: {
+      videos: [],
+      folders: [],
+      activeFolder: '',
+      search: '',
+      sort: 'name:asc',
+      viewMode: 'grid',
+      activeVideoPath: null,
+      activeMetadata: null,
+      progressInterval: null
+    }
   };
 
   // Cache DOM Elements
   const el = {
     app: document.getElementById('app'),
+    navFilesBtn: document.getElementById('navFilesBtn'),
+    navWatchBtn: document.getElementById('navWatchBtn'),
     searchInput: document.getElementById('searchInput'),
     clearSearchBtn: document.getElementById('clearSearchBtn'),
     mobileSearchBtn: document.getElementById('mobileSearchBtn'),
@@ -32,6 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
     viewToggleBtn: document.getElementById('viewToggleBtn'),
     viewToggleIcon: document.getElementById('viewToggleIcon'),
     settingsBtn: document.getElementById('settingsBtn'),
+    filesNavBar: document.getElementById('filesNavBar'),
     breadcrumbs: document.getElementById('breadcrumbs'),
     sortBtn: document.getElementById('sortBtn'),
     currentSortLabel: document.getElementById('currentSortLabel'),
@@ -52,8 +69,7 @@ document.addEventListener('DOMContentLoaded', () => {
     errorStateMessage: document.getElementById('errorStateMessage'),
     errorRetryBtn: document.getElementById('errorRetryBtn'),
     emptyState: document.getElementById('emptyState'),
-    emptyStateTitle: document.getElementById('emptyStateTitle'),
-    emptyStateMessage: document.getElementById('emptyStateMessage'),
+    fileBrowserSection: document.getElementById('fileBrowserSection'),
     fileContainer: document.getElementById('fileContainer'),
     itemsWrapper: document.getElementById('itemsWrapper'),
     dropOverlay: document.getElementById('dropOverlay'),
@@ -65,7 +81,32 @@ document.addEventListener('DOMContentLoaded', () => {
     contextMenu: document.getElementById('contextMenu'),
     contextMenuTitle: document.getElementById('contextMenuTitle'),
     toastContainer: document.getElementById('toastContainer'),
-    
+
+    // Watch Mode Elements
+    watchSection: document.getElementById('watchSection'),
+    continueWatchingShelf: document.getElementById('continueWatchingShelf'),
+    continueWatchingGrid: document.getElementById('continueWatchingGrid'),
+    watchFolderPills: document.getElementById('watchFolderPills'),
+    watchSearchInput: document.getElementById('watchSearchInput'),
+    watchSortSelect: document.getElementById('watchSortSelect'),
+    watchViewToggleBtn: document.getElementById('watchViewToggleBtn'),
+    watchViewIcon: document.getElementById('watchViewIcon'),
+    watchVideoGrid: document.getElementById('watchVideoGrid'),
+    watchEmptyState: document.getElementById('watchEmptyState'),
+
+    // Watch Player Modal Elements
+    watchPlayerModal: document.getElementById('watchPlayerModal'),
+    closeWatchPlayerBtn: document.getElementById('closeWatchPlayerBtn'),
+    watchPlayerTitle: document.getElementById('watchPlayerTitle'),
+    watchPlayerSub: document.getElementById('watchPlayerSub'),
+    watchPlayerFavBtn: document.getElementById('watchPlayerFavBtn'),
+    watchPlayerFavIcon: document.getElementById('watchPlayerFavIcon'),
+    watchVideoElement: document.getElementById('watchVideoElement'),
+    watchNoticeToast: document.getElementById('watchNoticeToast'),
+    watchSpeedSelect: document.getElementById('watchSpeedSelect'),
+    watchSubSelect: document.getElementById('watchSubSelect'),
+    watchPipBtn: document.getElementById('watchPipBtn'),
+
     // Modals & Settings
     settingsModal: document.getElementById('settingsModal'),
     showHiddenToggle: document.getElementById('showHiddenToggle'),
@@ -102,24 +143,65 @@ document.addEventListener('DOMContentLoaded', () => {
   setViewMode(state.viewMode);
   initSettingsUI();
 
-  // Parse Initial Path from History / URL
-  const initialPath = getPathFromUrl();
-  history.replaceState({ path: initialPath }, '', getFolderUrl(initialPath));
-  loadDirectory(initialPath, false);
+  // Check URL path for watch mode vs file browser
+  const pathname = window.location.pathname;
+  if (pathname.startsWith('/watch')) {
+    switchTab('watch', false);
+  } else {
+    const initialPath = getPathFromUrl();
+    history.replaceState({ path: initialPath, tab: 'files' }, '', getFolderUrl(initialPath));
+    loadDirectory(initialPath, false);
+  }
+
   fetchStorageInfo();
+
+  // --- Navigation Tabs Switcher (Files / Watch) ---
+  if (el.navFilesBtn) el.navFilesBtn.addEventListener('click', () => switchTab('files'));
+  if (el.navWatchBtn) el.navWatchBtn.addEventListener('click', () => switchTab('watch'));
+
+  function switchTab(tabName, pushState = true) {
+    state.currentTab = tabName;
+
+    if (el.navFilesBtn) el.navFilesBtn.classList.toggle('active', tabName === 'files');
+    if (el.navWatchBtn) el.navWatchBtn.classList.toggle('active', tabName === 'watch');
+
+    if (tabName === 'files') {
+      if (el.filesNavBar) el.filesNavBar.classList.remove('hidden');
+      if (el.fileBrowserSection) el.fileBrowserSection.classList.remove('hidden');
+      if (el.watchSection) el.watchSection.classList.add('hidden');
+      if (pushState) history.pushState({ path: state.currentPath, tab: 'files' }, '', getFolderUrl(state.currentPath));
+      loadDirectory(state.currentPath, false);
+    } else {
+      if (el.filesNavBar) el.filesNavBar.classList.add('hidden');
+      if (el.fileBrowserSection) el.fileBrowserSection.classList.add('hidden');
+      if (el.multiActionBar) el.multiActionBar.classList.add('hidden');
+      if (el.watchSection) el.watchSection.classList.remove('hidden');
+      if (pushState) history.pushState({ tab: 'watch' }, '', '/watch');
+      loadWatchData();
+    }
+  }
 
   // --- Browser History (Popstate) Event Listener ---
   window.addEventListener('popstate', (e) => {
     closeAllModals();
-    const targetPath = e.state ? (e.state.path ?? '') : getPathFromUrl();
-    loadDirectory(targetPath, false);
+    if (e.state && e.state.tab === 'watch') {
+      switchTab('watch', false);
+    } else {
+      const targetPath = e.state ? (e.state.path ?? '') : getPathFromUrl();
+      switchTab('files', false);
+      loadDirectory(targetPath, false);
+    }
   });
 
   // Global Keyboard Navigation
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      closeAllModals();
-      hideContextMenu();
+      if (!el.watchPlayerModal.classList.contains('hidden')) {
+        closeWatchPlayer();
+      } else {
+        closeAllModals();
+        hideContextMenu();
+      }
     }
   });
 
@@ -198,203 +280,97 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Backdrop click closes modals
-  document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
-    backdrop.addEventListener('click', (e) => {
-      if (e.target === backdrop) closeModal(backdrop);
-    });
-  });
-
-  // --- Settings Listeners ---
-  if (el.showHiddenToggle) {
-    el.showHiddenToggle.addEventListener('change', (e) => {
-      state.showHidden = e.target.checked;
-      localStorage.setItem('ff_show_hidden', state.showHidden);
-      loadDirectory(state.currentPath, false);
-    });
-  }
-
-  if (el.confirmDeleteToggle) {
-    el.confirmDeleteToggle.addEventListener('change', (e) => {
-      state.confirmDelete = e.target.checked;
-      localStorage.setItem('ff_confirm_delete', state.confirmDelete);
-    });
-  }
-
-  document.querySelectorAll('.theme-option').forEach(btn => {
-    btn.addEventListener('click', () => {
-      setTheme(btn.dataset.themeVal);
-    });
-  });
-
-  document.querySelectorAll('.segment-btn[data-view-val]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      setViewMode(btn.dataset.viewVal);
-    });
-  });
-
-  // --- Modal Form Actions ---
-  if (el.confirmNewFolderBtn) el.confirmNewFolderBtn.addEventListener('click', submitNewFolder);
-  if (el.confirmRenameBtn) el.confirmRenameBtn.addEventListener('click', submitRename);
-  if (el.confirmShareBtn) el.confirmShareBtn.addEventListener('click', submitShare);
-  if (el.copyShareUrlBtn) {
-    el.copyShareUrlBtn.addEventListener('click', () => {
-      el.shareUrlOutput.select();
-      navigator.clipboard.writeText(el.shareUrlOutput.value);
-      showToast('Copied to clipboard');
-    });
-  }
-
-  // --- Context Menu Listeners ---
-  document.addEventListener('click', hideContextMenu);
-  if (el.contextMenu) {
-    el.contextMenu.querySelectorAll('.menu-item').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        handleContextMenuAction(btn.dataset.action);
-        hideContextMenu();
-      });
-    });
-  }
-
-  // Setup Drag & Drop Upload
-  setupDragAndDrop();
-
   // ==========================================================================
-  // Navigation & Directory Loading
+  // File Server Engine Functions
   // ==========================================================================
+
+  async function loadDirectory(subPath, pushHistory = true) {
+    state.currentPath = subPath;
+    clearSelection();
+    showLoading(true);
+    showError(false);
+    showEmpty(false);
+
+    if (pushHistory) {
+      history.pushState({ path: subPath, tab: 'files' }, '', getFolderUrl(subPath));
+    }
+
+    renderBreadcrumbs(subPath);
+
+    const queryParams = new URLSearchParams({
+      path: subPath,
+      show_hidden: state.showHidden ? 'true' : 'false',
+      sort_by: state.sortBy,
+      sort_order: state.sortOrder
+    });
+
+    try {
+      const resp = await fetch(`/api/files/list?${queryParams.toString()}`);
+      if (!resp.ok) {
+        throw new Error(`HTTP error! status: ${resp.status}`);
+      }
+      const data = await resp.json();
+      state.items = data.items || [];
+
+      showLoading(false);
+
+      if (state.items.length === 0) {
+        showEmpty(true, 'Nothing here yet', 'Upload files or create a folder to get started.');
+        el.itemsWrapper.innerHTML = '';
+      } else {
+        renderItems(state.items);
+      }
+    } catch (err) {
+      showLoading(false);
+      showError(true, "Couldn't open this folder", err.message || 'Check connection or permissions.');
+    }
+  }
+
+  function getFolderUrl(path) {
+    return path ? `/browse/${path}` : '/';
+  }
 
   function getPathFromUrl() {
-    const params = new URLSearchParams(window.location.search);
-    if (params.has('path')) return params.get('path') || '';
-    if (window.location.pathname.startsWith('/browse/')) {
-      return decodeURIComponent(window.location.pathname.substring(8));
+    const pathname = window.location.pathname;
+    if (pathname.startsWith('/browse/')) {
+      return decodeURIComponent(pathname.substring(8));
     }
     return '';
   }
 
-  function getFolderUrl(path) {
-    if (!path) return window.location.pathname.startsWith('/browse/') ? '/browse/' : '/';
-    return `?path=${encodeURIComponent(path)}`;
-  }
-
-  function navigateToFolder(path) {
-    if (path === state.currentPath) return;
-    history.pushState({ path: path }, '', getFolderUrl(path));
-    loadDirectory(path, false);
-  }
-
-  async function loadDirectory(path, pushHistory = true) {
-    if (pushHistory) {
-      history.pushState({ path: path }, '', getFolderUrl(path));
-    }
-    state.currentPath = path;
-    clearSelection();
-
-    showLoading(true);
-    showError(false);
-    showEmpty(false);
-    el.itemsWrapper.innerHTML = '';
-
-    try {
-      const url = `/api/files/list?path=${encodeURIComponent(path)}&sort_by=${state.sortBy}&sort_order=${state.sortOrder}&show_hidden=${state.showHidden}`;
-      const res = await fetch(url);
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Failed to load directory');
-      }
-
-      const data = await res.json();
-      state.items = data.items || [];
-      renderBreadcrumbs(data.breadcrumbs || []);
-
-      if (state.items.length === 0) {
-        showEmpty(true, 'Nothing here yet', 'Upload files or create a folder.');
-      } else {
-        renderItems(state.items);
-      }
-    } catch (err) {
-      showError(true, "Couldn't open this folder", err.message || 'Folder inaccessible.');
-    } finally {
-      showLoading(false);
-    }
-  }
-
-  // ==========================================================================
-  // Search
-  // ==========================================================================
-
-  function onSearchInput(query) {
-    const trimmed = query.trim();
-    if (el.clearSearchBtn) el.clearSearchBtn.classList.toggle('hidden', !trimmed);
-    if (el.mobileClearSearchBtn) el.mobileClearSearchBtn.classList.toggle('hidden', !trimmed);
-
-    clearTimeout(state.searchDebounceTimer);
-    state.searchDebounceTimer = setTimeout(() => {
-      performSearch(trimmed);
-    }, 220);
-  }
-
-  function clearSearch() {
-    if (el.searchInput) el.searchInput.value = '';
-    if (el.mobileSearchInput) el.mobileSearchInput.value = '';
-    if (el.clearSearchBtn) el.clearSearchBtn.classList.add('hidden');
-    if (el.mobileClearSearchBtn) el.mobileClearSearchBtn.classList.add('hidden');
-    loadDirectory(state.currentPath, false);
-  }
-
-  async function performSearch(query) {
-    if (!query) {
-      loadDirectory(state.currentPath, false);
-      return;
-    }
-
-    showLoading(true);
-    showError(false);
-    showEmpty(false);
-
-    try {
-      const url = `/api/files/list?path=${encodeURIComponent(state.currentPath)}&search=${encodeURIComponent(query)}&show_hidden=${state.showHidden}`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error('Search failed');
-
-      const data = await res.json();
-      state.items = data.items || [];
-
-      if (state.items.length === 0) {
-        showEmpty(true, 'No files found', 'Try another search term.');
-      } else {
-        renderItems(state.items);
-      }
-    } catch (err) {
-      showToast(err.message, 'error');
-    } finally {
-      showLoading(false);
-    }
-  }
-
-  // ==========================================================================
-  // Breadcrumbs & Item Rendering
-  // ==========================================================================
-
-  function renderBreadcrumbs(crumbs) {
+  function renderBreadcrumbs(path) {
+    if (!el.breadcrumbs) return;
     el.breadcrumbs.innerHTML = '';
-    if (!crumbs || crumbs.length === 0) return;
 
-    crumbs.forEach((crumb, idx) => {
+    const rootLi = document.createElement('li');
+    rootLi.className = 'breadcrumb-item';
+    const rootBtn = document.createElement('button');
+    rootBtn.textContent = 'Storage';
+    rootBtn.addEventListener('click', () => loadDirectory(''));
+    rootLi.appendChild(rootBtn);
+    el.breadcrumbs.appendChild(rootLi);
+
+    if (!path) return;
+
+    const parts = path.split('/').filter(Boolean);
+    let accum = '';
+
+    parts.forEach((part, index) => {
+      accum += (accum ? '/' : '') + part;
+      const currentAccum = accum;
+
       const li = document.createElement('li');
-      const itemSpan = document.createElement('span');
-      itemSpan.className = `breadcrumb-item ${idx === crumbs.length - 1 ? 'active' : ''}`;
-      itemSpan.textContent = idx === 0 ? 'Files' : crumb.name;
+      li.className = 'breadcrumb-item';
 
-      itemSpan.addEventListener('click', () => navigateToFolder(crumb.path));
-      li.appendChild(itemSpan);
-
-      if (idx < crumbs.length - 1) {
-        const sep = document.createElement('span');
-        sep.className = 'breadcrumb-sep';
-        sep.textContent = '/';
-        li.appendChild(sep);
+      if (index === parts.length - 1) {
+        const span = document.createElement('span');
+        span.textContent = part;
+        li.appendChild(span);
+      } else {
+        const btn = document.createElement('button');
+        btn.textContent = part;
+        btn.addEventListener('click', () => loadDirectory(currentAccum));
+        li.appendChild(btn);
       }
 
       el.breadcrumbs.appendChild(li);
@@ -402,574 +378,556 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function renderItems(items) {
+    if (!el.itemsWrapper) return;
     el.itemsWrapper.innerHTML = '';
 
     items.forEach(item => {
+      const card = document.createElement('div');
+      card.className = `file-card ${state.viewMode === 'grid' ? 'grid-card' : 'list-card'}`;
+      card.dataset.path = item.path;
+
+      const iconSvg = getItemIconSvg(item);
+      const formattedSize = item.is_dir ? '' : formatBytes(item.size);
+      const formattedDate = formatDate(item.mtime);
+
       if (state.viewMode === 'grid') {
-        renderGridCard(item);
+        card.innerHTML = `
+          <div class="grid-thumb">
+            ${iconSvg}
+          </div>
+          <div class="grid-info">
+            <span class="grid-title truncate">${escapeHtml(item.name)}</span>
+            <span class="grid-meta">${item.is_dir ? 'Folder' : formattedSize}</span>
+          </div>
+        `;
       } else {
-        renderListRow(item);
-      }
-    });
-  }
-
-  function renderListRow(item) {
-    const row = document.createElement('div');
-    row.className = `file-row ${state.selectedPaths.has(item.path) ? 'selected' : ''}`;
-    row.dataset.path = item.path;
-
-    const isSelected = state.selectedPaths.has(item.path);
-    const sizeStr = item.is_dir ? '' : formatBytes(item.size);
-    const dateStr = formatDate(item.mtime);
-    const metaStr = [sizeStr, dateStr].filter(Boolean).join(' • ');
-    const iconSvg = getItemIconSvg(item);
-
-    row.innerHTML = `
-      <label class="custom-checkbox-wrapper row-checkbox" onclick="event.stopPropagation()">
-        <input type="checkbox" class="item-checkbox" ${isSelected ? 'checked' : ''}>
-        <span class="checkbox-box"></span>
-      </label>
-      <div class="file-icon-box">
-        ${getItemThumbnailOrIcon(item, iconSvg)}
-      </div>
-      <div class="file-info">
-        <span class="file-title truncate">${escapeHtml(item.name)}</span>
-        ${metaStr ? `<span class="file-meta">${metaStr}</span>` : ''}
-      </div>
-      <div class="row-actions" onclick="event.stopPropagation()">
-        ${item.is_dir ? `
-          <svg class="chevron-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
-        ` : `
-          <button class="icon-btn row-more-btn" title="More options">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
+        card.innerHTML = `
+          <label class="custom-checkbox-wrapper select-checkbox" onclick="event.stopPropagation()">
+            <input type="checkbox" class="item-checkbox" data-path="${escapeHtml(item.path)}">
+            <span class="checkbox-box"></span>
+          </label>
+          <div class="item-icon-wrapper">${iconSvg}</div>
+          <div class="item-details">
+            <span class="item-name truncate">${escapeHtml(item.name)}</span>
+            <span class="item-meta">${item.is_dir ? 'Folder' : formattedSize} · ${formattedDate}</span>
+          </div>
+          <button class="more-btn icon-btn-sm" title="More options" aria-label="More options">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="1"></circle>
+              <circle cx="12" cy="5" r="1"></circle>
+              <circle cx="12" cy="19" r="1"></circle>
+            </svg>
           </button>
-        `}
-      </div>
-    `;
-
-    row.addEventListener('click', () => {
-      if (item.is_dir) {
-        navigateToFolder(item.path);
-      } else {
-        openPreview(item);
+        `;
       }
-    });
 
-    const cb = row.querySelector('.item-checkbox');
-    if (cb) {
-      cb.addEventListener('change', (e) => {
-        toggleItemSelection(item.path, e.target.checked, row);
-      });
-    }
-
-    const moreBtn = row.querySelector('.row-more-btn');
-    if (moreBtn) {
-      moreBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        showContextMenu(e.clientX, e.clientY, item);
-      });
-    }
-
-    setupTouchAndContextMenu(row, item);
-    el.itemsWrapper.appendChild(row);
-  }
-
-  function renderGridCard(item) {
-    const card = document.createElement('div');
-    card.className = `grid-card ${state.selectedPaths.has(item.path) ? 'selected' : ''}`;
-    card.dataset.path = item.path;
-
-    const isSelected = state.selectedPaths.has(item.path);
-    const sizeStr = item.is_dir ? 'Folder' : formatBytes(item.size);
-    const iconSvg = getItemIconSvg(item);
-
-    card.innerHTML = `
-      <label class="custom-checkbox-wrapper grid-checkbox" onclick="event.stopPropagation()">
-        <input type="checkbox" class="item-checkbox" ${isSelected ? 'checked' : ''}>
-        <span class="checkbox-box"></span>
-      </label>
-      <button class="icon-btn-sm grid-more-btn" title="More options" onclick="event.stopPropagation()">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
-      </button>
-      <div class="grid-thumb-box">
-        ${getItemThumbnailOrIcon(item, iconSvg)}
-      </div>
-      <div class="grid-info">
-        <span class="grid-title truncate">${escapeHtml(item.name)}</span>
-        <span class="grid-meta">${sizeStr}</span>
-      </div>
-    `;
-
-    card.addEventListener('click', () => {
-      if (item.is_dir) {
-        navigateToFolder(item.path);
-      } else {
-        openPreview(item);
+      // Checkbox event
+      const cb = card.querySelector('.item-checkbox');
+      if (cb) {
+        cb.checked = state.selectedPaths.has(item.path);
+        cb.addEventListener('change', (e) => {
+          e.stopPropagation();
+          if (cb.checked) state.selectedPaths.add(item.path);
+          else state.selectedPaths.delete(item.path);
+          updateMultiSelectUI();
+        });
       }
-    });
 
-    const cb = card.querySelector('.item-checkbox');
-    if (cb) {
-      cb.addEventListener('change', (e) => {
-        toggleItemSelection(item.path, e.target.checked, card);
-      });
-    }
-
-    const moreBtn = card.querySelector('.grid-more-btn');
-    if (moreBtn) {
-      moreBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        showContextMenu(e.clientX, e.clientY, item);
-      });
-    }
-
-    setupTouchAndContextMenu(card, item);
-    el.itemsWrapper.appendChild(card);
-  }
-
-  function setupTouchAndContextMenu(element, item) {
-    element.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      showContextMenu(e.clientX, e.clientY, item);
-    });
-
-    element.addEventListener('touchstart', (e) => {
-      state.touchTimer = setTimeout(() => {
-        if (e.touches && e.touches[0]) {
-          showContextMenu(e.touches[0].clientX, e.touches[0].clientY, item);
+      // Card click -> Navigate or Open
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('.custom-checkbox-wrapper') || e.target.closest('.more-btn')) return;
+        if (item.is_dir) {
+          loadDirectory(item.path);
+        } else {
+          openFilePreview(item);
         }
-      }, 450);
-    }, { passive: true });
-
-    element.addEventListener('touchend', () => clearTimeout(state.touchTimer));
-    element.addEventListener('touchmove', () => clearTimeout(state.touchTimer));
-  }
-
-  function getItemThumbnailOrIcon(item, defaultSvg) {
-    const ext = (item.extension || '').toLowerCase();
-    const mime = item.mime_type || '';
-
-    if (!item.is_dir && (mime.startsWith('image/') || ['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(ext))) {
-      const src = `/api/files/download?path=${encodeURIComponent(item.path)}`;
-      return `<img src="${src}" class="thumb-img" alt="${escapeHtml(item.name)}" loading="lazy" onerror="this.onerror=null; this.outerHTML='${escapeHtml(defaultSvg)}';">`;
-    }
-    return defaultSvg;
-  }
-
-  // ==========================================================================
-  // Context Menu
-  // ==========================================================================
-
-  function showContextMenu(x, y, item) {
-    state.activeContextItem = item;
-    if (el.contextMenuTitle) el.contextMenuTitle.textContent = item.name;
-
-    if (el.contextMenu) {
-      el.contextMenu.classList.remove('hidden');
-      const menuWidth = 180;
-      const menuHeight = 220;
-      const posX = Math.min(x, window.innerWidth - menuWidth - 10);
-      const posY = Math.min(y, window.innerHeight - menuHeight - 10);
-
-      el.contextMenu.style.left = `${Math.max(10, posX)}px`;
-      el.contextMenu.style.top = `${Math.max(10, posY)}px`;
-    }
-  }
-
-  function hideContextMenu() {
-    if (el.contextMenu) el.contextMenu.classList.add('hidden');
-  }
-
-  function handleContextMenuAction(action) {
-    const item = state.activeContextItem;
-    if (!item) return;
-
-    switch (action) {
-      case 'open':
-        if (item.is_dir) navigateToFolder(item.path);
-        else openPreview(item);
-        break;
-      case 'download':
-        window.location.href = `/api/files/download?path=${encodeURIComponent(item.path)}`;
-        break;
-      case 'rename':
-        openRenameModal(item);
-        break;
-      case 'share':
-        openShareModal(item);
-        break;
-      case 'properties':
-        openPropertiesModal(item);
-        break;
-      case 'delete':
-        confirmAndDeleteItems([item.path]);
-        break;
-    }
-  }
-
-  // ==========================================================================
-  // Selection Logic
-  // ==========================================================================
-
-  function toggleItemSelection(path, isChecked, element) {
-    if (isChecked) {
-      state.selectedPaths.add(path);
-      element.classList.add('selected');
-    } else {
-      state.selectedPaths.delete(path);
-      element.classList.remove('selected');
-    }
-    updateMultiActionBar();
-  }
-
-  function toggleSelectAll(e) {
-    const isChecked = e.target.checked;
-    state.selectedPaths.clear();
-
-    if (isChecked) {
-      state.items.forEach(i => state.selectedPaths.add(i.path));
-    }
-
-    document.querySelectorAll('.file-row, .grid-card').forEach(card => {
-      const cb = card.querySelector('.item-checkbox');
-      if (cb) cb.checked = isChecked;
-      card.classList.toggle('selected', isChecked);
-    });
-
-    updateMultiActionBar();
-  }
-
-  function clearSelection() {
-    state.selectedPaths.clear();
-    if (el.selectAllCheckbox) el.selectAllCheckbox.checked = false;
-    document.querySelectorAll('.file-row, .grid-card').forEach(card => {
-      card.classList.remove('selected');
-      const cb = card.querySelector('.item-checkbox');
-      if (cb) cb.checked = false;
-    });
-    updateMultiActionBar();
-  }
-
-  function updateMultiActionBar() {
-    const count = state.selectedPaths.size;
-    if (el.multiActionBar) el.multiActionBar.classList.toggle('hidden', count === 0);
-    if (el.selectedCountText) el.selectedCountText.textContent = `${count} selected`;
-    if (el.selectAllCheckbox) el.selectAllCheckbox.checked = count > 0 && count === state.items.length;
-  }
-
-  async function handleMultiDownload() {
-    if (state.selectedPaths.size === 0) return;
-    const paths = Array.from(state.selectedPaths);
-    showToast('Creating ZIP...');
-    try {
-      const res = await fetch('/api/files/zip', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paths })
       });
-      if (!res.ok) throw new Error('Failed to create ZIP');
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'archive.zip';
-      a.click();
-    } catch (err) {
-      showToast(err.message, 'error');
-    }
-  }
 
-  function handleMultiDelete() {
-    if (state.selectedPaths.size === 0) return;
-    confirmAndDeleteItems(Array.from(state.selectedPaths));
-  }
-
-  async function confirmAndDeleteItems(paths) {
-    if (paths.length === 0) return;
-    if (state.confirmDelete) {
-      const msg = paths.length === 1 ? `Delete '${paths[0].split('/').pop()}'?` : `Delete ${paths.length} items?`;
-      if (!confirm(msg)) return;
-    }
-
-    try {
-      const res = await fetch('/api/files/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paths })
+      // Context menu
+      card.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        showContextMenu(e.clientX, e.clientY, item);
       });
-      if (!res.ok) throw new Error('Failed to delete');
-      showToast(`${paths.length} item(s) deleted`);
-      fetchStorageInfo();
-      loadDirectory(state.currentPath, false);
-    } catch (err) {
-      showToast(err.message, 'error');
-    }
-  }
 
-  // ==========================================================================
-  // File Upload
-  // ==========================================================================
-
-  async function handleFileUpload(e) {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
-    if (el.uploadProgressPanel) el.uploadProgressPanel.classList.remove('hidden');
-    if (el.uploadPanelTitle) el.uploadPanelTitle.textContent = `Uploading ${files.length} file(s)...`;
-    if (el.uploadProgressFill) el.uploadProgressFill.style.width = '10%';
-    if (el.uploadList) el.uploadList.innerHTML = '';
-
-    Array.from(files).forEach(f => {
-      const row = document.createElement('div');
-      row.className = 'upload-item-row';
-      row.innerHTML = `
-        <span class="truncate" style="max-width: 70%;">${escapeHtml(f.name)}</span>
-        <span>${formatBytes(f.size)}</span>
-      `;
-      if (el.uploadList) el.uploadList.appendChild(row);
-    });
-
-    const formData = new FormData();
-    formData.append('path', state.currentPath);
-    for (let i = 0; i < files.length; i++) {
-      formData.append('files', files[i]);
-    }
-
-    try {
-      if (el.uploadProgressFill) el.uploadProgressFill.style.width = '60%';
-      const res = await fetch('/api/files/upload', {
-        method: 'POST',
-        body: formData
-      });
-      if (!res.ok) throw new Error('Upload failed');
-      if (el.uploadProgressFill) el.uploadProgressFill.style.width = '100%';
-      if (el.uploadPanelTitle) el.uploadPanelTitle.textContent = 'Upload complete';
-      showToast(`Uploaded ${files.length} file(s)`);
-      fetchStorageInfo();
-      loadDirectory(state.currentPath, false);
-      setTimeout(() => {
-        if (el.uploadProgressPanel) el.uploadProgressPanel.classList.add('hidden');
-      }, 3000);
-    } catch (err) {
-      if (el.uploadPanelTitle) el.uploadPanelTitle.textContent = 'Upload failed';
-      showToast(err.message, 'error');
-    } finally {
-      if (el.fileInput) el.fileInput.value = '';
-    }
-  }
-
-  function setupDragAndDrop() {
-    let counter = 0;
-    window.addEventListener('dragenter', (e) => {
-      e.preventDefault();
-      counter++;
-      if (el.dropOverlay) el.dropOverlay.classList.remove('hidden');
-    });
-
-    window.addEventListener('dragleave', (e) => {
-      e.preventDefault();
-      counter--;
-      if (counter === 0 && el.dropOverlay) el.dropOverlay.classList.add('hidden');
-    });
-
-    window.addEventListener('dragover', (e) => e.preventDefault());
-
-    window.addEventListener('drop', (e) => {
-      e.preventDefault();
-      counter = 0;
-      if (el.dropOverlay) el.dropOverlay.classList.add('hidden');
-      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-        handleFileUpload({ target: { files: e.dataTransfer.files } });
+      const moreBtn = card.querySelector('.more-btn');
+      if (moreBtn) {
+        moreBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const rect = moreBtn.getBoundingClientRect();
+          showContextMenu(rect.left, rect.bottom + 4, item);
+        });
       }
+
+      el.itemsWrapper.appendChild(card);
     });
   }
 
   // ==========================================================================
-  // Modals & Dialogs
+  // Watch Media Mode Logic
   // ==========================================================================
 
-  function promptNewFolder() {
-    if (el.newFolderNameInput) el.newFolderNameInput.value = '';
-    openModal(el.newFolderModal);
-    setTimeout(() => {
-      if (el.newFolderNameInput) el.newFolderNameInput.focus();
-    }, 150);
+  if (el.watchSearchInput) {
+    el.watchSearchInput.addEventListener('input', (e) => {
+      state.watch.search = e.target.value;
+      loadWatchVideos();
+    });
   }
 
-  async function submitNewFolder() {
-    const name = el.newFolderNameInput ? el.newFolderNameInput.value.trim() : '';
-    if (!name) return;
+  if (el.watchSortSelect) {
+    el.watchSortSelect.addEventListener('change', (e) => {
+      state.watch.sort = e.target.value;
+      loadWatchVideos();
+    });
+  }
+
+  if (el.watchViewToggleBtn) {
+    el.watchViewToggleBtn.addEventListener('click', () => {
+      state.watch.viewMode = state.watch.viewMode === 'grid' ? 'list' : 'grid';
+      el.watchVideoGrid.classList.toggle('list-view', state.watch.viewMode === 'list');
+    });
+  }
+
+  if (el.closeWatchPlayerBtn) {
+    el.closeWatchPlayerBtn.addEventListener('click', closeWatchPlayer);
+  }
+
+  async function loadWatchData() {
+    await loadContinueWatching();
+    await loadWatchVideos();
+  }
+
+  async function loadContinueWatching() {
     try {
-      const res = await fetch('/api/files/create-folder', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: state.currentPath, name })
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Failed to create folder');
+      const resp = await fetch('/api/watch/progress');
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const progressList = data.progress || [];
+
+      if (!el.continueWatchingShelf || !el.continueWatchingGrid) return;
+
+      if (progressList.length === 0) {
+        el.continueWatchingShelf.classList.add('hidden');
+        el.continueWatchingGrid.innerHTML = '';
+      } else {
+        el.continueWatchingShelf.classList.remove('hidden');
+        el.continueWatchingGrid.innerHTML = '';
+
+        progressList.forEach(item => {
+          const card = document.createElement('div');
+          card.className = 'watch-card continue-card';
+          const thumbUrl = `/api/watch/thumbnail?path=${encodeURIComponent(item.path)}`;
+          const percent = item.percent || 0;
+
+          card.innerHTML = `
+            <div class="thumb-container">
+              <img class="thumb-img" src="${thumbUrl}" alt="" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
+              <div class="thumb-placeholder" style="display:none">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+              </div>
+              <span class="duration-badge">${percent}%</span>
+              <div class="progress-bar-bottom">
+                <div class="progress-bar-fill" style="width: ${percent}%"></div>
+              </div>
+            </div>
+            <div class="card-info">
+              <span class="card-title">${escapeHtml(item.title || item.name)}</span>
+            </div>
+          `;
+
+          card.addEventListener('click', () => openWatchPlayer(item.path));
+          el.continueWatchingGrid.appendChild(card);
+        });
       }
-      closeModal(el.newFolderModal);
-      showToast(`Folder '${name}' created`);
-      loadDirectory(state.currentPath, false);
-    } catch (err) {
-      showToast(err.message, 'error');
+    } catch (e) {
+      console.warn("Couldn't load continue watching:", e);
     }
   }
 
-  function openRenameModal(item) {
-    state.activeContextItem = item;
-    if (el.renameItemInput) el.renameItemInput.value = item.name;
-    openModal(el.renameModal);
-    setTimeout(() => {
-      if (el.renameItemInput) el.renameItemInput.focus();
-    }, 150);
+  async function loadWatchVideos() {
+    showLoading(true);
+    if (el.watchEmptyState) el.watchEmptyState.classList.add('hidden');
+
+    const [sortBy, sortOrder] = state.watch.sort.split(':');
+    const isFavOnly = state.watch.activeFolder === 'favorites';
+    const folderFilter = (isFavOnly || !state.watch.activeFolder) ? '' : state.watch.activeFolder;
+
+    const params = new URLSearchParams({
+      sort_by: sortBy,
+      sort_order: sortOrder
+    });
+
+    if (state.watch.search) params.append('search', state.watch.search);
+    if (folderFilter) params.append('folder', folderFilter);
+    if (isFavOnly) params.append('favorite_only', 'true');
+
+    try {
+      const resp = await fetch(`/api/watch/videos?${params.toString()}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+
+      state.watch.videos = data.videos || [];
+      state.watch.folders = data.folders || [];
+
+      renderFolderPills(state.watch.folders);
+      renderWatchGrid(state.watch.videos);
+      showLoading(false);
+    } catch (err) {
+      showLoading(false);
+      showToast("Error loading Watch videos: " + err.message, "error");
+    }
   }
 
-  async function submitRename() {
-    const newName = el.renameItemInput ? el.renameItemInput.value.trim() : '';
-    const item = state.activeContextItem;
-    if (!newName || !item || newName === item.name) {
-      closeModal(el.renameModal);
+  function renderFolderPills(folders) {
+    if (!el.watchFolderPills) return;
+    el.watchFolderPills.innerHTML = '';
+
+    const allPill = document.createElement('button');
+    allPill.className = `folder-pill ${state.watch.activeFolder === '' ? 'active' : ''}`;
+    allPill.textContent = 'All';
+    allPill.addEventListener('click', () => {
+      state.watch.activeFolder = '';
+      loadWatchVideos();
+    });
+    el.watchFolderPills.appendChild(allPill);
+
+    const favPill = document.createElement('button');
+    favPill.className = `folder-pill ${state.watch.activeFolder === 'favorites' ? 'active' : ''}`;
+    favPill.textContent = 'Favorites';
+    favPill.addEventListener('click', () => {
+      state.watch.activeFolder = 'favorites';
+      loadWatchVideos();
+    });
+    el.watchFolderPills.appendChild(favPill);
+
+    folders.forEach(f => {
+      const pill = document.createElement('button');
+      pill.className = `folder-pill ${state.watch.activeFolder === f ? 'active' : ''}`;
+      pill.textContent = f;
+      pill.addEventListener('click', () => {
+        state.watch.activeFolder = f;
+        loadWatchVideos();
+      });
+      el.watchFolderPills.appendChild(pill);
+    });
+  }
+
+  function renderWatchGrid(videos) {
+    if (!el.watchVideoGrid) return;
+    el.watchVideoGrid.innerHTML = '';
+
+    if (videos.length === 0) {
+      if (el.watchEmptyState) el.watchEmptyState.classList.remove('hidden');
       return;
     }
 
-    try {
-      const res = await fetch('/api/files/rename', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: item.path, new_name: newName })
+    videos.forEach(v => {
+      const card = document.createElement('div');
+      card.className = 'watch-card';
+      const thumbUrl = `/api/watch/thumbnail?path=${encodeURIComponent(v.path)}`;
+      const formattedSize = formatBytes(v.size);
+      const progressPercent = v.progress ? (v.progress.percent || 0) : 0;
+      const isFav = v.is_favorite || false;
+
+      card.innerHTML = `
+        <div class="thumb-container">
+          <img class="thumb-img" src="${thumbUrl}" alt="" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
+          <div class="thumb-placeholder" style="display:none">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect><line x1="7" y1="2" x2="7" y2="22"></line><line x1="17" y1="2" x2="17" y2="22"></line><line x1="2" y1="12" x2="22" y2="12"></line></svg>
+          </div>
+          <button class="card-fav-btn ${isFav ? 'active' : ''}" title="Favorite" aria-label="Favorite">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+          </button>
+          ${progressPercent > 0 ? `
+            <div class="progress-bar-bottom">
+              <div class="progress-bar-fill" style="width: ${progressPercent}%"></div>
+            </div>
+          ` : ''}
+        </div>
+        <div class="card-info">
+          <span class="card-title">${escapeHtml(v.title || v.name)}</span>
+          <div class="card-meta">
+            <span>${v.folder || 'Root'}</span>
+            <span class="meta-dot">·</span>
+            <span>${formattedSize}</span>
+          </div>
+        </div>
+      `;
+
+      // Favorite toggle
+      const favBtn = card.querySelector('.card-fav-btn');
+      favBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleWatchFavorite(v.path, !isFav);
       });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Failed to rename');
-      }
-      closeModal(el.renameModal);
-      showToast(`Renamed to '${newName}'`);
-      loadDirectory(state.currentPath, false);
-    } catch (err) {
-      showToast(err.message, 'error');
-    }
+
+      card.addEventListener('click', () => openWatchPlayer(v.path));
+      el.watchVideoGrid.appendChild(card);
+    });
   }
 
-  function openPropertiesModal(item) {
-    if (el.propName) el.propName.textContent = item.name;
-    if (el.propType) el.propType.textContent = item.is_dir ? 'Directory' : item.mime_type || 'File';
-    if (el.propSize) el.propSize.textContent = item.is_dir ? '--' : formatBytes(item.size);
-    if (el.propPath) el.propPath.textContent = item.path || '/';
-    if (el.propMtime) el.propMtime.textContent = formatDate(item.mtime);
-    openModal(el.propertiesModal);
-  }
-
-  function openShareModal(item) {
-    state.activeContextItem = item;
-    if (el.shareItemName) el.shareItemName.textContent = `Sharing: ${item.name}`;
-    if (el.sharePasswordInput) el.sharePasswordInput.value = '';
-    if (el.shareResultArea) el.shareResultArea.classList.add('hidden');
-    openModal(el.shareModal);
-  }
-
-  async function submitShare() {
-    const item = state.activeContextItem;
-    if (!item) return;
-
+  async function toggleWatchFavorite(path, setFavorite) {
     try {
-      const payload = {
-        path: item.path,
-        password: (el.sharePasswordInput && el.sharePasswordInput.value.trim()) || null,
-        expires_in_seconds: (el.shareExpireSelect && el.shareExpireSelect.value) ? parseInt(el.shareExpireSelect.value) : null
-      };
-
-      const res = await fetch('/api/shares/create', {
-        method: 'POST',
+      const method = setFavorite ? 'POST' : 'DELETE';
+      const resp = await fetch('/api/watch/favorites', {
+        method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ path })
       });
-      if (!res.ok) throw new Error('Failed to create share link');
-
-      const data = await res.json();
-      const shareUrl = `${window.location.origin}/api/shares/download/${data.id}`;
-      if (el.shareUrlOutput) el.shareUrlOutput.value = shareUrl;
-      if (el.shareResultArea) el.shareResultArea.classList.remove('hidden');
-      showToast('Share link generated');
-    } catch (err) {
-      showToast(err.message, 'error');
-    }
-  }
-
-  function openPreview(item) {
-    if (el.previewTitle) el.previewTitle.textContent = item.name;
-    if (el.previewBody) el.previewBody.innerHTML = '<div class="liquid-spinner"></div>';
-    openModal(el.previewModal);
-
-    const downloadUrl = `/api/files/download?path=${encodeURIComponent(item.path)}`;
-    const mime = item.mime_type || '';
-
-    if (mime.startsWith('image/')) {
-      if (el.previewBody) el.previewBody.innerHTML = `<img src="${downloadUrl}" alt="${escapeHtml(item.name)}">`;
-    } else if (mime.startsWith('video/')) {
-      if (el.previewBody) el.previewBody.innerHTML = `<video controls autoplay><source src="${downloadUrl}" type="${mime}">Video playback unsupported.</video>`;
-    } else if (mime.startsWith('audio/')) {
-      if (el.previewBody) el.previewBody.innerHTML = `<audio controls autoplay><source src="${downloadUrl}" type="${mime}">Audio playback unsupported.</audio>`;
-    } else {
-      fetch(`/api/files/preview?path=${encodeURIComponent(item.path)}`)
-        .then(r => r.json())
-        .then(data => {
-          if (data.type === 'text' && el.previewBody) {
-            el.previewBody.innerHTML = `<pre><code>${escapeHtml(data.content)}</code></pre>`;
-          } else if (el.previewBody) {
-            el.previewBody.innerHTML = `
-              <div style="text-align:center; padding: 20px;">
-                <p style="margin-bottom: 12px; color: var(--text-secondary);">Direct preview unavailable.</p>
-                <a href="${downloadUrl}" class="action-btn-primary" style="display:inline-flex;">Download File</a>
-              </div>`;
-          }
-        })
-        .catch(() => {
-          if (el.previewBody) {
-            el.previewBody.innerHTML = `
-              <div style="text-align:center; padding: 20px;">
-                <a href="${downloadUrl}" class="action-btn-primary" style="display:inline-flex;">Download File</a>
-              </div>`;
-          }
-        });
-    }
-  }
-
-  // ==========================================================================
-  // Storage Info & Settings Helpers
-  // ==========================================================================
-
-  async function fetchStorageInfo() {
-    try {
-      const res = await fetch('/api/storage/info');
-      if (res.ok) {
-        const data = await res.json();
-        const percent = `${data.percent_used}%`;
-        const usedGB = (data.used_bytes / (1024 ** 3)).toFixed(1);
-        const totalGB = (data.total_bytes / (1024 ** 3)).toFixed(1);
-
-        if (el.settingsStoragePercent) el.settingsStoragePercent.textContent = percent;
-        if (el.settingsStorageDetails) el.settingsStorageDetails.textContent = `${usedGB} GB of ${totalGB} GB`;
+      if (resp.ok) {
+        showToast(setFavorite ? "Added to Favorites" : "Removed from Favorites");
+        loadWatchVideos();
       }
     } catch (e) {
-      console.error(e);
+      showToast("Error updating favorite", "error");
     }
   }
 
-  function initSettingsUI() {
-    if (el.showHiddenToggle) el.showHiddenToggle.checked = state.showHidden;
-    if (el.confirmDeleteToggle) el.confirmDeleteToggle.checked = state.confirmDelete;
-    updateSortUI();
-    updateThemeSelectorUI(state.theme);
-    updateSegmentedControlUI(state.viewMode);
+  // --- Watch Video Player ---
+  async function openWatchPlayer(videoPath) {
+    state.watch.activeVideoPath = videoPath;
+
+    // Reset player elements
+    el.watchVideoElement.pause();
+    el.watchVideoElement.removeAttribute('src');
+    el.watchVideoElement.innerHTML = '';
+    el.watchNoticeToast.classList.add('hidden');
+    el.watchSubSelect.innerHTML = '<option value="off">Off</option>';
+
+    // Show Player Modal
+    el.watchPlayerModal.classList.remove('hidden');
+
+    try {
+      const resp = await fetch(`/api/watch/video?path=${encodeURIComponent(videoPath)}`);
+      if (!resp.ok) throw new Error("Could not load video details");
+      const meta = await resp.json();
+      state.watch.activeMetadata = meta;
+
+      el.watchPlayerTitle.textContent = meta.filename || videoPath.split('/').pop();
+      el.watchPlayerSub.textContent = meta.resolution ? `${meta.resolution} · ${formatBytes(meta.size)}` : formatBytes(meta.size);
+
+      const isFav = meta.is_favorite || false;
+      el.watchPlayerFavIcon.style.fill = isFav ? '#ff3b30' : 'none';
+      el.watchPlayerFavIcon.style.color = isFav ? '#ff3b30' : 'currentColor';
+
+      // Set video source
+      const streamUrl = `/api/watch/stream?path=${encodeURIComponent(videoPath)}`;
+      el.watchVideoElement.src = streamUrl;
+
+      // Subtitles setup
+      if (meta.subtitles && meta.subtitles.length > 0) {
+        meta.subtitles.forEach((sub, idx) => {
+          const trackUrl = `/api/watch/subtitles?path=${encodeURIComponent(sub.path)}`;
+          const track = document.createElement('track');
+          track.kind = 'subtitles';
+          track.label = sub.label || `Track ${idx + 1}`;
+          track.srclang = sub.lang || 'en';
+          track.src = trackUrl;
+          el.watchVideoElement.appendChild(track);
+
+          const opt = document.createElement('option');
+          opt.value = idx;
+          opt.textContent = `${sub.label} (${sub.name})`;
+          el.watchSubSelect.appendChild(opt);
+        });
+      }
+
+      // Resume position setup
+      const savedProg = meta.progress;
+      if (savedProg && savedProg.position_seconds > 5 && savedProg.percent < 95) {
+        const onLoaded = () => {
+          el.watchVideoElement.currentTime = savedProg.position_seconds;
+          showNoticeToast(`Resumed from ${formatDuration(savedProg.position_seconds)}`);
+          el.watchVideoElement.removeEventListener('loadedmetadata', onLoaded);
+        };
+        el.watchVideoElement.addEventListener('loadedmetadata', onLoaded);
+      }
+
+      // Codec / container notice
+      const ext = (meta.extension || '').toLowerCase();
+      if (['.avi', '.mkv'].includes(ext)) {
+        showNoticeToast(`Playback format ${ext.toUpperCase()}: Requires browser codec support`, 3500);
+      }
+
+      // Auto play
+      el.watchVideoElement.play().catch(() => {});
+
+      // Start periodic progress tracking (every 5 seconds)
+      if (state.watch.progressInterval) clearInterval(state.watch.progressInterval);
+      state.watch.progressInterval = setInterval(saveCurrentProgress, 5000);
+
+    } catch (err) {
+      showToast("Error opening video: " + err.message, "error");
+    }
+  }
+
+  function closeWatchPlayer() {
+    saveCurrentProgress();
+    if (state.watch.progressInterval) {
+      clearInterval(state.watch.progressInterval);
+      state.watch.progressInterval = null;
+    }
+
+    el.watchVideoElement.pause();
+    el.watchVideoElement.removeAttribute('src');
+    el.watchVideoElement.load();
+    el.watchPlayerModal.classList.add('hidden');
+    state.watch.activeVideoPath = null;
+
+    // Refresh Continue Watching row
+    loadContinueWatching();
+  }
+
+  function saveCurrentProgress() {
+    if (!state.watch.activeVideoPath || !el.watchVideoElement) return;
+    const pos = el.watchVideoElement.currentTime;
+    const dur = el.watchVideoElement.duration;
+
+    if (pos && dur && dur > 0) {
+      fetch('/api/watch/progress', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          path: state.watch.activeVideoPath,
+          position_seconds: pos,
+          duration_seconds: dur
+        })
+      }).catch(() => {});
+    }
+  }
+
+  // Player Controls Listeners
+  if (el.watchSpeedSelect) {
+    el.watchSpeedSelect.addEventListener('change', (e) => {
+      el.watchVideoElement.playbackRate = parseFloat(e.target.value);
+    });
+  }
+
+  if (el.watchSubSelect) {
+    el.watchSubSelect.addEventListener('change', (e) => {
+      const val = e.target.value;
+      const tracks = el.watchVideoElement.textTracks;
+      for (let i = 0; i < tracks.length; i++) {
+        tracks[i].mode = (val !== 'off' && parseInt(val) === i) ? 'showing' : 'hidden';
+      }
+    });
+  }
+
+  if (el.watchPipBtn) {
+    el.watchPipBtn.addEventListener('click', () => {
+      if (document.pictureInPictureElement) {
+        document.exitPictureInPicture().catch(() => {});
+      } else if (el.watchVideoElement.requestPictureInPicture) {
+        el.watchVideoElement.requestPictureInPicture().catch(() => {});
+      }
+    });
+  }
+
+  if (el.watchPlayerFavBtn) {
+    el.watchPlayerFavBtn.addEventListener('click', async () => {
+      if (!state.watch.activeVideoPath) return;
+      const isCurrentlyFav = el.watchPlayerFavIcon.style.fill === 'rgb(255, 59, 48)' || el.watchPlayerFavIcon.style.fill === '#ff3b30';
+      await toggleWatchFavorite(state.watch.activeVideoPath, !isCurrentlyFav);
+      el.watchPlayerFavIcon.style.fill = !isCurrentlyFav ? '#ff3b30' : 'none';
+      el.watchPlayerFavIcon.style.color = !isCurrentlyFav ? '#ff3b30' : 'currentColor';
+    });
+  }
+
+  // Watch Player Keyboard Shortcuts
+  document.addEventListener('keydown', (e) => {
+    if (el.watchPlayerModal.classList.contains('hidden')) return;
+
+    if (e.code === 'Space' || e.code === 'KeyK') {
+      e.preventDefault();
+      if (el.watchVideoElement.paused) el.watchVideoElement.play();
+      else el.watchVideoElement.pause();
+    } else if (e.code === 'KeyF') {
+      e.preventDefault();
+      if (document.fullscreenElement) document.exitFullscreen();
+      else el.watchVideoElement.requestFullscreen().catch(() => {});
+    } else if (e.code === 'KeyM') {
+      e.preventDefault();
+      el.watchVideoElement.muted = !el.watchVideoElement.muted;
+    } else if (e.code === 'ArrowLeft' || e.code === 'KeyJ') {
+      e.preventDefault();
+      el.watchVideoElement.currentTime = Math.max(0, el.watchVideoElement.currentTime - 5);
+      showNoticeToast("-5s");
+    } else if (e.code === 'ArrowRight' || e.code === 'KeyL') {
+      e.preventDefault();
+      el.watchVideoElement.currentTime = Math.min(el.watchVideoElement.duration || 0, el.watchVideoElement.currentTime + 5);
+      showNoticeToast("+5s");
+    }
+  });
+
+  function showNoticeToast(msg, duration = 2000) {
+    if (!el.watchNoticeToast) return;
+    el.watchNoticeToast.textContent = msg;
+    el.watchNoticeToast.classList.remove('hidden');
+    setTimeout(() => {
+      el.watchNoticeToast.classList.add('hidden');
+    }, duration);
+  }
+
+  function formatDuration(seconds) {
+    if (!seconds || isNaN(seconds)) return '00:00';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+
+    const mStr = String(m).padStart(2, '0');
+    const sStr = String(s).padStart(2, '0');
+
+    if (h > 0) {
+      return `${h}:${mStr}:${sStr}`;
+    }
+    return `${mStr}:${sStr}`;
+  }
+
+  // ==========================================================================
+  // File Action Operations
+  // ==========================================================================
+
+  function onSearchInput(query) {
+    if (state.searchDebounceTimer) clearTimeout(state.searchDebounceTimer);
+    state.searchDebounceTimer = setTimeout(() => {
+      if (!query.trim()) {
+        renderItems(state.items);
+        return;
+      }
+      const q = query.toLowerCase();
+      const filtered = state.items.filter(item => item.name.toLowerCase().includes(q));
+      renderItems(filtered);
+    }, 150);
+  }
+
+  function clearSearch() {
+    if (el.searchInput) el.searchInput.value = '';
+    if (el.mobileSearchInput) el.mobileSearchInput.value = '';
+    if (el.clearSearchBtn) el.clearSearchBtn.classList.add('hidden');
+    if (el.mobileClearSearchBtn) el.mobileClearSearchBtn.classList.add('hidden');
+    renderItems(state.items);
+  }
+
+  function toggleViewMode() {
+    state.viewMode = state.viewMode === 'list' ? 'grid' : 'list';
+    localStorage.setItem('ff_view_mode', state.viewMode);
+    setViewMode(state.viewMode);
+    renderItems(state.items);
+  }
+
+  function setViewMode(mode) {
+    if (el.fileContainer) {
+      el.fileContainer.className = `file-container ${mode}-view`;
+    }
   }
 
   function updateSortUI() {
-    const labelMap = { name: 'Name', mtime: 'Date', size: 'Size', type: 'Type' };
-    if (el.currentSortLabel) el.currentSortLabel.textContent = labelMap[state.sortBy] || 'Sort';
-    if (el.toggleSortOrderBtn) el.toggleSortOrderBtn.textContent = `Order: ${state.sortOrder === 'asc' ? 'Ascending' : 'Descending'}`;
-
+    if (el.currentSortLabel) {
+      const labelMap = { name: 'Name', mtime: 'Date', size: 'Size', type: 'Type' };
+      el.currentSortLabel.textContent = labelMap[state.sortBy] || 'Sort';
+    }
+    if (el.toggleSortOrderBtn) {
+      el.toggleSortOrderBtn.textContent = `Order: ${state.sortOrder === 'asc' ? 'Ascending' : 'Descending'}`;
+    }
     if (el.sortDropdown) {
       el.sortDropdown.querySelectorAll('.dropdown-item[data-sort]').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.sort === state.sortBy);
@@ -977,53 +935,421 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function initTheme(theme) {
-    state.theme = theme;
-    localStorage.setItem('ff_theme', theme);
-    const effectiveTheme = theme === 'system' 
-      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-      : theme;
-    document.documentElement.setAttribute('data-theme', effectiveTheme);
-    updateThemeSelectorUI(theme);
-  }
-
-  function setTheme(theme) {
-    initTheme(theme);
-  }
-
-  function updateThemeSelectorUI(theme) {
-    document.querySelectorAll('.theme-option').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.themeVal === theme);
+  function toggleSelectAll(e) {
+    const isChecked = e.target.checked;
+    state.selectedPaths.clear();
+    if (isChecked) {
+      state.items.forEach(item => state.selectedPaths.add(item.path));
+    }
+    document.querySelectorAll('.item-checkbox').forEach(cb => {
+      cb.checked = isChecked;
     });
+    updateMultiSelectUI();
   }
 
-  function setViewMode(mode) {
-    state.viewMode = mode;
-    localStorage.setItem('ff_view_mode', mode);
-    if (el.fileContainer) el.fileContainer.className = `file-container ${mode}-view`;
-    updateSegmentedControlUI(mode);
+  function updateMultiSelectUI() {
+    const count = state.selectedPaths.size;
+    if (el.multiActionBar) el.multiActionBar.classList.toggle('hidden', count === 0);
+    if (el.selectedCountText) el.selectedCountText.textContent = `${count} selected`;
+    if (el.selectAllCheckbox) el.selectAllCheckbox.checked = count > 0 && count === state.items.length;
+  }
 
-    if (el.viewToggleIcon) {
-      if (mode === 'grid') {
-        el.viewToggleIcon.innerHTML = `<line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line>`;
-      } else {
-        el.viewToggleIcon.innerHTML = `<rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect>`;
+  function clearSelection() {
+    state.selectedPaths.clear();
+    document.querySelectorAll('.item-checkbox').forEach(cb => cb.checked = false);
+    if (el.selectAllCheckbox) el.selectAllCheckbox.checked = false;
+    updateMultiSelectUI();
+  }
+
+  // Multi Action Handlers
+  function handleMultiDownload() {
+    if (state.selectedPaths.size === 0) return;
+    const pathsParam = Array.from(state.selectedPaths).map(p => encodeURIComponent(p)).join('&paths=');
+    window.location.href = `/api/files/download-zip?paths=${pathsParam}`;
+  }
+
+  async function handleMultiDelete() {
+    if (state.selectedPaths.size === 0) return;
+    if (state.confirmDelete) {
+      if (!confirm(`Delete ${state.selectedPaths.size} selected items?`)) return;
+    }
+
+    const paths = Array.from(state.selectedPaths);
+    showLoading(true);
+
+    try {
+      const resp = await fetch('/api/files/batch-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths })
+      });
+      if (!resp.ok) throw new Error("Delete failed");
+      showToast(`Deleted ${paths.length} items`);
+      loadDirectory(state.currentPath, false);
+    } catch (err) {
+      showLoading(false);
+      showToast(err.message, 'error');
+    }
+  }
+
+  // Upload Logic
+  async function handleFileUpload(e) {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    if (el.uploadProgressPanel) el.uploadProgressPanel.classList.remove('hidden');
+    if (el.uploadList) el.uploadList.innerHTML = '';
+
+    const totalFiles = files.length;
+    let completedFiles = 0;
+
+    for (let i = 0; i < totalFiles; i++) {
+      const file = files[i];
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('path', state.currentPath);
+
+      const row = document.createElement('div');
+      row.className = 'upload-item-row';
+      row.innerHTML = `<span>${escapeHtml(file.name)}</span><span>Uploading...</span>`;
+      el.uploadList.appendChild(row);
+
+      try {
+        const resp = await fetch('/api/files/upload', {
+          method: 'POST',
+          body: formData
+        });
+        if (!resp.ok) throw new Error("Failed");
+        row.querySelector('span:last-child').textContent = 'Done';
+      } catch (err) {
+        row.querySelector('span:last-child').textContent = 'Error';
+      }
+
+      completedFiles++;
+      if (el.uploadProgressFill) {
+        el.uploadProgressFill.style.width = `${Math.round((completedFiles / totalFiles) * 100)}%`;
       }
     }
 
-    if (state.items.length > 0) renderItems(state.items);
+    showToast(`Uploaded ${completedFiles} files`);
+    el.fileInput.value = '';
+    loadDirectory(state.currentPath, false);
   }
 
-  function toggleViewMode() {
-    setViewMode(state.viewMode === 'grid' ? 'list' : 'grid');
+  // Drag and Drop
+  window.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    if (el.dropOverlay) el.dropOverlay.classList.remove('hidden');
+  });
+
+  window.addEventListener('dragleave', (e) => {
+    if (e.relatedTarget === null && el.dropOverlay) {
+      el.dropOverlay.classList.add('hidden');
+    }
+  });
+
+  window.addEventListener('drop', (e) => {
+    e.preventDefault();
+    if (el.dropOverlay) el.dropOverlay.classList.add('hidden');
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      el.fileInput.files = e.dataTransfer.files;
+      handleFileUpload({ target: { files: e.dataTransfer.files } });
+    }
+  });
+
+  // Prompt New Folder
+  function promptNewFolder() {
+    if (el.newFolderNameInput) el.newFolderNameInput.value = '';
+    openModal(el.newFolderModal);
+    setTimeout(() => el.newFolderNameInput.focus(), 100);
   }
 
-  function updateSegmentedControlUI(mode) {
-    document.querySelectorAll('.segment-btn[data-view-val]').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.viewVal === mode);
+  if (el.confirmNewFolderBtn) {
+    el.confirmNewFolderBtn.addEventListener('click', async () => {
+      const folderName = el.newFolderNameInput.value.trim();
+      if (!folderName) return;
+
+      closeModal(el.newFolderModal);
+      showLoading(true);
+
+      try {
+        const resp = await fetch('/api/files/mkdir', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            path: state.currentPath ? `${state.currentPath}/${folderName}` : folderName
+          })
+        });
+        if (!resp.ok) throw new Error("Couldn't create folder");
+        showToast("Folder created");
+        loadDirectory(state.currentPath, false);
+      } catch (err) {
+        showLoading(false);
+        showToast(err.message, 'error');
+      }
     });
   }
 
+  // Context Menu Actions
+  function showContextMenu(x, y, item) {
+    state.activeContextItem = item;
+    if (!el.contextMenu) return;
+
+    if (el.contextMenuTitle) el.contextMenuTitle.textContent = item.name;
+
+    el.contextMenu.style.left = `${Math.min(x, window.innerWidth - 190)}px`;
+    el.contextMenu.style.top = `${Math.min(y, window.innerHeight - 220)}px`;
+    el.contextMenu.classList.remove('hidden');
+  }
+
+  function hideContextMenu() {
+    if (el.contextMenu) el.contextMenu.classList.add('hidden');
+  }
+
+  document.addEventListener('click', hideContextMenu);
+
+  if (el.contextMenu) {
+    el.contextMenu.querySelectorAll('.menu-item').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        hideContextMenu();
+        const action = btn.dataset.action;
+        const item = state.activeContextItem;
+        if (!item) return;
+
+        if (action === 'open') {
+          if (item.is_dir) loadDirectory(item.path);
+          else openFilePreview(item);
+        } else if (action === 'download') {
+          window.location.href = `/api/files/download?path=${encodeURIComponent(item.path)}`;
+        } else if (action === 'rename') {
+          promptRename(item);
+        } else if (action === 'share') {
+          promptShare(item);
+        } else if (action === 'properties') {
+          showProperties(item);
+        } else if (action === 'delete') {
+          confirmDeleteItem(item);
+        }
+      });
+    });
+  }
+
+  function promptRename(item) {
+    if (el.renameItemInput) el.renameItemInput.value = item.name;
+    openModal(el.renameModal);
+  }
+
+  if (el.confirmRenameBtn) {
+    el.confirmRenameBtn.addEventListener('click', async () => {
+      const newName = el.renameItemInput.value.trim();
+      const item = state.activeContextItem;
+      if (!newName || !item) return;
+
+      closeModal(el.renameModal);
+      showLoading(true);
+
+      const parentDir = item.path.includes('/') ? item.path.substring(0, item.path.lastIndexOf('/')) : '';
+      const newPath = parentDir ? `${parentDir}/${newName}` : newName;
+
+      try {
+        const resp = await fetch('/api/files/rename', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ old_path: item.path, new_path: newPath })
+        });
+        if (!resp.ok) throw new Error("Rename failed");
+        showToast("Renamed successfully");
+        loadDirectory(state.currentPath, false);
+      } catch (err) {
+        showLoading(false);
+        showToast(err.message, 'error');
+      }
+    });
+  }
+
+  async function confirmDeleteItem(item) {
+    if (state.confirmDelete) {
+      if (!confirm(`Delete "${item.name}"?`)) return;
+    }
+    showLoading(true);
+
+    try {
+      const resp = await fetch('/api/files/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: item.path })
+      });
+      if (!resp.ok) throw new Error("Delete failed");
+      showToast("Item deleted");
+      loadDirectory(state.currentPath, false);
+    } catch (err) {
+      showLoading(false);
+      showToast(err.message, 'error');
+    }
+  }
+
+  function showProperties(item) {
+    if (el.propName) el.propName.textContent = item.name;
+    if (el.propType) el.propType.textContent = item.is_dir ? 'Folder' : (item.extension || 'File');
+    if (el.propSize) el.propSize.textContent = item.is_dir ? '—' : formatBytes(item.size);
+    if (el.propPath) el.propPath.textContent = item.path;
+    if (el.propMtime) el.propMtime.textContent = formatDate(item.mtime);
+    openModal(el.propertiesModal);
+  }
+
+  function promptShare(item) {
+    if (el.shareItemName) el.shareItemName.textContent = `Sharing: ${item.name}`;
+    if (el.sharePasswordInput) el.sharePasswordInput.value = '';
+    if (el.shareResultArea) el.shareResultArea.classList.add('hidden');
+    openModal(el.shareModal);
+  }
+
+  if (el.confirmShareBtn) {
+    el.confirmShareBtn.addEventListener('click', async () => {
+      const item = state.activeContextItem;
+      if (!item) return;
+
+      const password = el.sharePasswordInput.value.trim() || null;
+      const expireVal = el.shareExpireSelect.value;
+      const expiresInSeconds = expireVal ? parseInt(expireVal) : null;
+
+      try {
+        const resp = await fetch('/api/shares/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            path: item.path,
+            password: password,
+            expires_in_seconds: expiresInSeconds
+          })
+        });
+        if (!resp.ok) throw new Error("Share link creation failed");
+        const data = await resp.json();
+
+        const shareUrl = `${window.location.origin}/api/shares/get/${data.id}`;
+        if (el.shareUrlOutput) el.shareUrlOutput.value = shareUrl;
+        if (el.shareResultArea) el.shareResultArea.classList.remove('hidden');
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+  }
+
+  if (el.copyShareUrlBtn) {
+    el.copyShareUrlBtn.addEventListener('click', () => {
+      if (el.shareUrlOutput) {
+        navigator.clipboard.writeText(el.shareUrlOutput.value);
+        showToast("Share link copied to clipboard");
+      }
+    });
+  }
+
+  // File Preview
+  function openFilePreview(item) {
+    if (!el.previewModal || !el.previewBody) return;
+    if (el.previewTitle) el.previewTitle.textContent = item.name;
+    el.previewBody.innerHTML = '';
+
+    const streamUrl = `/api/files/download?path=${encodeURIComponent(item.path)}`;
+    const ext = (item.extension || '').toLowerCase();
+    const mime = item.mime_type || '';
+
+    if (mime.startsWith('image/') || ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg'].includes(ext)) {
+      const img = document.createElement('img');
+      img.src = streamUrl;
+      el.previewBody.appendChild(img);
+    } else if (mime.startsWith('video/') || ['.mp4', '.webm', '.mkv', '.mov', '.avi'].includes(ext)) {
+      // If user clicks video file in file browser, route cleanly to Watch player!
+      openWatchPlayer(item.path);
+      return;
+    } else if (mime.startsWith('audio/') || ['.mp3', '.flac', '.wav', '.ogg'].includes(ext)) {
+      const audio = document.createElement('audio');
+      audio.controls = true;
+      audio.src = streamUrl;
+      el.previewBody.appendChild(audio);
+    } else {
+      // Text / Code preview
+      fetch(streamUrl)
+        .then(r => r.text())
+        .then(txt => {
+          const pre = document.createElement('pre');
+          pre.textContent = txt.slice(0, 100000);
+          el.previewBody.appendChild(pre);
+        })
+        .catch(() => {
+          el.previewBody.textContent = 'Preview not available for this file type.';
+        });
+    }
+
+    openModal(el.previewModal);
+  }
+
+  // Settings & Theme
+  function initTheme(themeName) {
+    if (themeName === 'system') {
+      const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+    } else {
+      document.documentElement.setAttribute('data-theme', themeName);
+    }
+  }
+
+  function initSettingsUI() {
+    if (el.showHiddenToggle) {
+      el.showHiddenToggle.checked = state.showHidden;
+      el.showHiddenToggle.addEventListener('change', (e) => {
+        state.showHidden = e.target.checked;
+        localStorage.setItem('ff_show_hidden', state.showHidden);
+        loadDirectory(state.currentPath, false);
+      });
+    }
+
+    if (el.confirmDeleteToggle) {
+      el.confirmDeleteToggle.checked = state.confirmDelete;
+      el.confirmDeleteToggle.addEventListener('change', (e) => {
+        state.confirmDelete = e.target.checked;
+        localStorage.setItem('ff_confirm_delete', state.confirmDelete);
+      });
+    }
+
+    document.querySelectorAll('.theme-option').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.themeVal === state.theme);
+      btn.addEventListener('click', () => {
+        state.theme = btn.dataset.themeVal;
+        localStorage.setItem('ff_theme', state.theme);
+        document.querySelectorAll('.theme-option').forEach(b => b.classList.toggle('active', b === btn));
+        initTheme(state.theme);
+      });
+    });
+
+    document.querySelectorAll('[data-view-val]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.viewVal === state.viewMode);
+      btn.addEventListener('click', () => {
+        state.viewMode = btn.dataset.viewVal;
+        localStorage.setItem('ff_view_mode', state.viewMode);
+        document.querySelectorAll('[data-view-val]').forEach(b => b.classList.toggle('active', b === btn));
+        setViewMode(state.viewMode);
+        renderItems(state.items);
+      });
+    });
+  }
+
+  async function fetchStorageInfo() {
+    try {
+      const resp = await fetch('/api/storage/info');
+      if (!resp.ok) return;
+      const data = await resp.json();
+      if (el.settingsStorageDetails) {
+        el.settingsStorageDetails.textContent = `${formatBytes(data.used_bytes)} of ${formatBytes(data.total_bytes)}`;
+      }
+      if (el.settingsStoragePercent) {
+        el.settingsStoragePercent.textContent = `${data.used_percent}%`;
+      }
+    } catch (e) {}
+  }
+
+  // Modal Helpers
   function openModal(modalEl) {
     if (modalEl) modalEl.classList.remove('hidden');
   }
@@ -1033,11 +1359,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function closeAllModals() {
-    [el.settingsModal, el.newFolderModal, el.renameModal, el.propertiesModal, el.shareModal, el.previewModal].forEach(m => {
-      if (m) closeModal(m);
-    });
+    document.querySelectorAll('.modal-backdrop').forEach(m => m.classList.add('hidden'));
   }
 
+  // State Helpers
   function showLoading(show) {
     if (el.loadingState) el.loadingState.classList.toggle('hidden', !show);
   }
